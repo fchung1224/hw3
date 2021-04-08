@@ -1,0 +1,159 @@
+---
+title: "HW3"
+author: "Federico Chung"
+date: "4/7/2021"
+output: html_document
+---
+
+```{r}
+# SEE modeldata package for new datasets
+library(tidyverse)         # for graphing and data cleaning
+library(tidymodels)        # for modeling
+library(stacks)            # for stacking models
+library(naniar)            # for examining missing values (NAs)
+library(lubridate)         # for date manipulation
+library(moderndive)        # for King County housing data
+library(DALEX)             # for model interpretation  
+library(DALEXtra)          # for extension of DALEX
+library(patchwork)         # for combining plots nicely
+library(dbplyr)            # for SQL query "cheating" - part of tidyverse but needs to be loaded separately
+
+library(mdsr)              # for accessing some databases - goes with Modern Data Science with R textbook
+library(RMySQL)            # for accessing MySQL databases
+library(RSQLite)           # for accessing SQLite databases
+
+#mapping
+library(maps)              # for built-in maps
+library(sf)                # for making maps using geom_sf
+library(ggthemes)          # Lisa added - I like theme_map() for maps :)
+
+#tidytext
+
+library(tidytext)          # for text analysis, the tidy way!
+library(textdata)          
+library(reshape2)
+library(wordcloud)         # for wordcloud
+library(stopwords)
+
+theme_set(theme_minimal()) # Lisa's favorite theme
+```
+```{r}
+data("house_prices")
+
+# Create log_price and drop price variable
+house_prices <- house_prices %>% 
+  mutate(log_price = log(price, base = 10)) %>% 
+  # make all integers numeric ... fixes prediction problem
+  mutate(across(where(is.integer), as.numeric)) %>% 
+  select(-price)
+```
+
+
+
+#SQL
+
+
+```{r}
+con_air <- dbConnect(RMySQL::MySQL(), 
+                     dbname = "airlines", 
+                     host = "mdsr.cdc7tgkkqd0n.us-east-1.rds.amazonaws.com", 
+                     user = "mdsr_public", 
+                     password = "ImhsmflMDSwR")
+```
+
+```{r}
+con_air <- dbConnect_scidb("airlines")
+```
+
+
+```{r}
+dbListTables(con_air)
+```
+```{sql connection=con_air}
+SHOW TABLES;
+```
+```{r}
+dbListFields(con_air, "flights")
+```
+
+```{sql connection=con_air}
+DESCRIBE flights
+```
+
+```{sql connection=con_air}
+DESCRIBE airports
+```
+
+
+Create a SQL chunk and an equivalent R code chunk that does the following: for each airport (with its name, not code), year, and month find the total number of departing flights, the distinct destinations to which they flew, the average length of the flight, the average distance of the flight, and the proportion of flights that arrived more than 20 minutes late. In the R code chunk, write this out to a dataset. (HINT: 1. start small! 2. you may want to do the R part first and use it to “cheat” into the SQL code).
+
+```{r}
+flights<-
+  tbl(con_air,
+      sql("
+          SELECT *
+          FROM flights
+          "))
+
+airports<-
+  tbl(con_air,
+      sql("
+          SELECT *
+          FROM airports
+          "))
+
+
+airports
+```
+
+
+
+
+```{r}
+flights
+```
+
+Join by origin 
+
+
+```{r}
+small_flights<- flights%>%head(200)
+small_flights
+
+airports
+
+small_flights%>%
+  inner_join(airports, by=c("origin" = "faa"))%>%
+  group_by(year, month, name)%>%
+  mutate(arr_delay = ifelse(arr_delay>20,1,0))%>%
+  summarize(count = n(), distinct_destinations = n_distinct(dest), avg_length = mean(air_time), avg_dist = mean(distance),prop_late = sum(arr_delay)/n())
+```
+```{sql connection=con_air}
+SELECT 
+  a.name,
+  year,
+  month,
+  num_flights,
+  num_dest,
+  avg_air_time,
+  avg_dist,
+  late_over20
+FROM(SELECT 
+  year, 
+  month,
+  origin,
+  COUNT(*) AS num_flights,
+  COUNT(DISTINCT dest) AS num_dest,
+  AVG(air_time) AS avg_air_time,
+  AVG(distance) AS avg_dist,
+  AVG(arr_delay > 20) AS late_over20
+FROM (SELECT * FROM flights LIMIT 10000) fl
+GROUP BY origin, month, year) smry
+INNER JOIN airports AS a ON (smry.origin = a.faa)
+```
+
+
+
+
+
+
